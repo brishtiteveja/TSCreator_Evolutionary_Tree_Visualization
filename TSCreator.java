@@ -50,6 +50,7 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.StringTokenizer;
 import java.util.Vector;
+import java.util.regex.Pattern;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipFile;
 import java.util.ArrayList;
@@ -107,8 +108,9 @@ import datastore.DataColumn;
 import datastore.DatafileCrypto;
 import datastore.Datastore;
 import datastore.MetaColumn;
-
+import datastore.loader.Loader1;
 import datastore.loader.ParseException;
+import datastore.loader.SimpleCharStream;
 
 import java.net.URI;
 /**
@@ -131,7 +133,7 @@ public class TSCreator extends JApplet implements ActionListener {
     public static boolean ENABLE_3D = false;
     public static boolean ENABLE_DATAPACK_ENCRYPTION = true; // When set true, the datapack will be saved as encrypted.
     public static final String MAX_MEMORY = "1G";
-    public static final int NUMBER_LINES_LIMIT_PUBLIC = 3000;
+    public static final int NUMBER_CHARS_LIMIT_PUBLIC = 3000;
     public static final int NUMBER_DATAPACKS_LIMIT_PUBLIC = 3;
     private static int numDatapacksAdded = 0;
     private JFrame getPRO = null;
@@ -142,6 +144,8 @@ public class TSCreator extends JApplet implements ActionListener {
     public static String DATAPACK_INFO = ResPath.getRootlessPath("datapacks.datapack_info");
     public static String BUILT_IN_DATA_FILE = null;
     public static boolean command_line_datapack_flag = false;
+    public static List<String> command_line_datapacks = null;
+    public static int command_line_datapack_id = 0;
     public static String SETTINGS_FILE = null;
     public static boolean command_line_settings_flag = false; // Set to true if datapack is specified on command line
     public static final String DEFAULT_COLORING_FILE = ResPath.getPath("settings_xml.coloring");
@@ -185,7 +189,7 @@ public class TSCreator extends JApplet implements ActionListener {
     JPanel mainView;
     JEditorPane htmlView;
     CardLayout mainViewLayout;
-    JFrame tscFrame;
+    public static JFrame tscFrame;
     Container contentPane;
     JPanel displayPanel, topPanel;
     JLabel info;
@@ -286,6 +290,9 @@ public class TSCreator extends JApplet implements ActionListener {
 
 
     public JMenu forum = new JMenu(Language.translate("Forum", true));
+	private int numCharsInDatapack = -1;
+	private int numLinesInDatapack = -1;
+	private boolean evTreeColumnExists = false;
     /**
      * This constructor is used when run as an application (main() calls it)
      *
@@ -786,11 +793,13 @@ public class TSCreator extends JApplet implements ActionListener {
                     throw new Exception("Nothing Loaded.");
                 }
             }
+
             // set up the FontManagers for the whole image
             db.rootColumn.setParentFontManager(settings.fonts);
 
             // notify the settings that things have changed
             settings.dataAdded();
+            
             
             double changedTopAge = settings.topAge;
             double changedBaseAge = settings.baseAge;
@@ -798,6 +807,15 @@ public class TSCreator extends JApplet implements ActionListener {
 
             // apply default settings (if any)
             applyDefaultSettings();
+            if (TSCreator.NODE_MODE && command_line_datapack_flag && command_line_datapacks != null ) {
+            	while(command_line_datapack_id < command_line_datapacks.size()) {
+            		numDatapacksAdded += 1;
+            		loadDataFromFile(false, false);
+            	}
+            	// Apply default settings again as the default settings include the columns for new datapacks too
+            	if(command_line_settings_flag)
+            		applyDefaultSettings();
+            }
 
             // set top age, base age and vertical scale as given in the default datapack 
             if (settings.changedDefaultTopAge) {
@@ -830,8 +848,6 @@ public class TSCreator extends JApplet implements ActionListener {
             		settings.timesChanged(settings.VERTSCALE_CHANGED, db.getCurrentUnits());
             	}
             }
-
-
 
             //generate settings
             if (TSCreator.SETTINGS_FILE != null) {
@@ -956,6 +972,11 @@ public class TSCreator extends JApplet implements ActionListener {
         fileChooser.setFilenameFilter(new FilenameFilter() {
             public boolean accept(File directory, String filename) {
                 return (filename.endsWith(".txt")
+                		|| filename.endsWith(".tre")
+                		|| filename.endsWith(".nwk")
+                		|| filename.endsWith(".newick")
+                		|| filename.endsWith(".nex")
+                		|| filename.endsWith(".nexus")
                         || filename.endsWith(".dpk")
                         || filename.endsWith(".mdpk")
                         || filename.endsWith(".map")
@@ -1209,7 +1230,14 @@ public class TSCreator extends JApplet implements ActionListener {
             selFile = new File(TSCreator.BUILT_IN_DATA_FILE);
         }
         else{
-            selFile = this.openLoadFileChooser();
+        	if (NODE_MODE == false) {
+        		selFile = this.openLoadFileChooser();
+        	}
+        	else {
+        		System.out.println(command_line_datapacks.get(command_line_datapack_id));
+        		selFile = new File(command_line_datapacks.get(command_line_datapack_id));
+        		command_line_datapack_id++;
+        	}
         }
     	
     	if (selFile != null) {
@@ -1272,9 +1300,9 @@ public class TSCreator extends JApplet implements ActionListener {
 
                 	loadDatapackFile(selFile);
 
-                	String topString = Double.toString(settings1.topAge);
-                	String baseString = Double.toString(settings1.baseAge);
-                	String vertScale = Double.toString(settings1.scale);
+                	String topString = Double.toString(settings.topAge);
+                	String baseString = Double.toString(settings.baseAge);
+                	String vertScale = Double.toString(settings.scale);
 
                 	if(vertFlag){
                 	   settings.setVertScale(db.getCurrentUnits(), vertScale);
@@ -1293,9 +1321,9 @@ public class TSCreator extends JApplet implements ActionListener {
                	    vertFlag = true;
                 	loadDatapackFile(selFile);
 
-                	String topString = Double.toString(settings1.topAge);
-                	String baseString = Double.toString(settings1.baseAge);
-                	String vertScale = Double.toString(settings1.scale);
+                	String topString = Double.toString(settings.topAge);
+                	String baseString = Double.toString(settings.baseAge);
+                	String vertScale = Double.toString(settings.scale);
 
                 	if(vertFlag){
                 	   settings.setVertScale(db.getCurrentUnits(), vertScale);
@@ -1491,9 +1519,17 @@ public class TSCreator extends JApplet implements ActionListener {
                     db.loadRASC(fileInfo);
                 } else if (extension.equalsIgnoreCase("svg")) {
                     new TemplateLoader(tscFrame, selFile.getAbsolutePath(), db);
-                } else if (extension.equalsIgnoreCase("json")) {
+                } 
+                else if (extension.equalsIgnoreCase("json")) {
                     db.loadJSON(fileInfo);
-                } else if (extension.equalsIgnoreCase("txt") || extension.equalsIgnoreCase("dpk") || extension.equalsIgnoreCase("mdpk")) {
+                } 
+                else if (extension.equalsIgnoreCase("nwk") || extension.equalsIgnoreCase("newick") || extension.equalsIgnoreCase("tre")) {
+                    db.loadNewick(fileInfo);
+                } 
+                else if (extension.equalsIgnoreCase("nex") || extension.equalsIgnoreCase("nexus") ) {
+                    db.loadNexus(fileInfo);
+                } 
+                else if (extension.equalsIgnoreCase("txt") || extension.equalsIgnoreCase("dpk") || extension.equalsIgnoreCase("mdpk")) {
                     if (!loadEncrypted(fileInfo, false)) {
                         throw new Exception("Nothing Loaded.");
                     }
@@ -1706,6 +1742,211 @@ public class TSCreator extends JApplet implements ActionListener {
             throw e;
         }
     }
+    
+    String whitespace_chars =  ""       /* dummy empty string for homogeneity */
+            + "\\u0009" // CHARACTER TABULATION
+            + "\\u000A" // LINE FEED (LF)
+            + "\\u000B" // LINE TABULATION
+            + "\\u000C" // FORM FEED (FF)
+            + "\\u000D" // CARRIAGE RETURN (CR)
+            + "\\u0020" // SPACE
+            + "\\u0085" // NEXT LINE (NEL) 
+            + "\\u00A0" // NO-BREAK SPACE
+            + "\\u1680" // OGHAM SPACE MARK
+            + "\\u180E" // MONGOLIAN VOWEL SEPARATOR
+            + "\\u2000" // EN QUAD 
+            + "\\u2001" // EM QUAD 
+            + "\\u2002" // EN SPACE
+            + "\\u2003" // EM SPACE
+            + "\\u2004" // THREE-PER-EM SPACE
+            + "\\u2005" // FOUR-PER-EM SPACE
+            + "\\u2006" // SIX-PER-EM SPACE
+            + "\\u2007" // FIGURE SPACE
+            + "\\u2008" // PUNCTUATION SPACE
+            + "\\u2009" // THIN SPACE
+            + "\\u200A" // HAIR SPACE
+            + "\\u2028" // LINE SEPARATOR
+            + "\\u2029" // PARAGRAPH SEPARATOR
+            + "\\u202F" // NARROW NO-BREAK SPACE
+            + "\\u205F" // MEDIUM MATHEMATICAL SPACE
+            + "\\u3000" // IDEOGRAPHIC SPACE
+            ;        
+    /* A \s that actually works for Java’s native character set: Unicode */
+    String     whitespace_charclass = "["  + whitespace_chars + "]";
+	private boolean encryptedDatapack = false;    
+    
+    public int checkevTreeColumnExistsAndCalculateCharNums(InputStream input, DataColumn.FileInfo fileInfo) throws ParseException {
+        String enc = null;
+        UnicodeInputStream uin = new UnicodeInputStream(input, enc);
+        enc = uin.getEncoding(); // check for BOM mark and skip bytes
+        //Debug.print("Encoding = " + enc);
+        if (enc == null) {
+            //Debug.print("Encoding is null, defaulting to winows-1252 or macroman as tab delimited file in microsoft excel has these encodings.");
+        	if (System.getProperty("os.name").contains("Mac OS X"))
+        		enc = "macroman";
+        	else
+        		enc = "windows-1252";
+//            enc = "UTF-8";
+        } // This was the only way to support foreign chars in Windows
+        
+        int ln, ci, nln;
+        HashMap<Integer, String> evTreeColumnMap = new HashMap<Integer, String> ();
+        HashMap<Integer, Integer> evTreeColumnMapStart = new HashMap<Integer, Integer> ();
+        HashMap<Integer, Integer> evTreeColumnMapEnd = new HashMap<Integer, Integer> ();
+        HashMap<Integer, Integer> evTreeColumnCharCount = new HashMap<Integer, Integer> ();
+		int evTreeTotalCharCount = -1;
+
+        try { 
+        	SimpleCharStream stream = new SimpleCharStream(uin, enc, 1, 1); 
+        	String s = stream.toString();
+        	
+        	String dString = ""; 
+        	StringBuilder line = new StringBuilder(); 
+      
+        	ln = 0; //line number 
+        	ci = 0; //character number
+        	nln = 0; // new line number
+        	char c;
+        	
+        	
+        	String[] matchColumnChars = {
+        			"\trange\t"			, "\trange-overlay\t"		, "\trange-underlay\t"	  	, "\trange-only\t"		,
+
+        			"\tchron\t"			, "\tchron-overlay\t"		, "\tchron-underlay"		, "\tchron-only\t"		,
+        			"\tfacies\t"		, "\tfacies-overlay\t"		, "\tfacies-underlay\t"		, "\tfacies-only\t"		,
+        			"\tblank\t"			, "\tblank-overlay\t"		, "\tblank-underlay\t"		, "\tblank-only\t"		,
+        			"\tblock\t"			, "\tblock-overlay\t"		, "\tblock-underlay\t"		, "\tblock-only\t"      ,
+        			"\tevent\t"			, "\tevent-overlay\t"		, "\tevent-underlay\t"		, "\tevent-only\t"      ,
+        			"\tpoint\t"			, "\tpoint-overlay\t"		, "\tpoint-underlay\t"   	, "\tpoint-only\t"		,
+        			"\tsequence\t"		, "\tsequence-overlay\t"	, "\tsequence-underlay\t" 	, "\tsequence-only\t"	,
+        			"\ttrend\t"			, "\ttrend-overlay\t"	    , "\ttrend-underlay\t"		, "\ttrend-only\t"		,
+        			"\taverage\t"		, "\taverage-overlay\t"		, "\taverage-underlay\t"	, "\taverage-only\t"	,
+        			"\ttransect\t"		, "\ttransect-overlay\t"	, "\ttransect-underlay\t"	, "\ttransect-only\t"	,
+        			"\tfreehand\t"		, "\tfreehand-underlay\t"	, "\tfreehand-overlay\t"    , "\tfreehand-only\t"	,
+        			"\t:\t"
+        	};
+        	int evTreeColumnID = 0;
+        	int evTreeCharCount = 0;
+			boolean evTreeColumnStartRow = false;
+			boolean evTreeColumnStart = false;
+
+			try {
+				c = stream.readChar();
+				ci++;
+	        	do {
+	        		line.append(c);
+	        		
+	        		if (evTreeColumnStartRow == false && 
+	        				(	line.toString().contains(matchColumnChars[0]) == true || 
+	        					line.toString().contains(matchColumnChars[1]) == true || 
+	        					line.toString().contains(matchColumnChars[2]) == true || 
+	        					line.toString().contains(matchColumnChars[3]) == true 
+	        				)
+	        			) {
+	        			evTreeColumnStartRow = true; // tracks just the first line of the evtree column
+	        			evTreeColumnStart = true;    // tracks all the rows of evtree column
+	        			evTreeColumnExists  = true;  // 
+	        			
+	        			// find the starting line of the tree column 
+	        			evTreeColumnMap.put(evTreeColumnID, line.toString());
+	        			evTreeColumnMapStart.put(evTreeColumnID, ln);
+	        		}
+	        		
+	        		if(evTreeColumnStart == true) {
+	        			evTreeCharCount++;
+	        		}
+	        		
+	        		// when the current line ends
+	        		if (c == '\n' || c == '\r') {
+	        			// only when currently parsing a evTreeColumn
+	        			if(evTreeColumnStart == true) {
+	        				// find the ending line of the tree column
+	        				for(int ix=4; ix<matchColumnChars.length; ix++) {
+	        					String oc = matchColumnChars[ix];
+	        					if (line.toString().contains(oc) == true) {
+	        						evTreeColumnMapEnd.put(evTreeColumnID, ln-1);
+
+	        						// remove the current line characters
+	        						evTreeCharCount -= line.length() - 1;
+	        						evTreeColumnCharCount.put(evTreeColumnID, evTreeCharCount);
+	        						evTreeTotalCharCount += evTreeCharCount;
+
+	        						// resetting character count
+	        						evTreeCharCount = 0;
+	        						evTreeColumnStart = false;
+	        						evTreeColumnID++;
+	        						break;
+	        					}
+	        				}
+	        			}
+
+	        			if(evTreeColumnStartRow == true) {
+	        				evTreeColumnStartRow = false;
+	        			}
+	        			
+	        			dString += new String(line);
+	        			ln++;
+
+	        			String newLine = line.toString().replaceAll(whitespace_charclass,"");
+	        			if (newLine.length() == 0) {
+	        				nln++;
+	        			}
+	        			
+	        			line = new StringBuilder();
+	        		}
+	        		c = stream.readChar();
+	        		ci++;
+	        	} while(true);
+			} catch (IOException e) {
+				// checking whether the exception happened while parsing the tree column
+				if(evTreeColumnStart == true) {
+    				evTreeColumnMapEnd.put(evTreeColumnID, ln-1);
+
+    				// remove the current line characters
+    				evTreeColumnCharCount.put(evTreeColumnID, evTreeCharCount);
+    				evTreeTotalCharCount += evTreeCharCount;
+
+    				// resetting character count
+    				evTreeCharCount = 0;
+    				evTreeColumnStart = false;
+    				evTreeColumnID++;
+    			}
+				//e.printStackTrace();
+				System.out.println("Reached end of datapack while calculating the character numbers for evolutionary tree columns.");
+			} catch (Exception e) {
+				e.printStackTrace();
+			}
+			
+			numCharsInDatapack = ci - nln;
+			numLinesInDatapack = ln - nln;
+	        System.out.println("Number of characters in datapack = "+ numCharsInDatapack);
+	        System.out.println("Number of lines in datapack = "+ numLinesInDatapack);
+        } catch(java.io.UnsupportedEncodingException e) { 
+        	throw new RuntimeException(e); 
+        } catch(Exception e) {
+        	throw new RuntimeException(e);
+        }
+        
+        return evTreeTotalCharCount;
+    }
+    
+    private int getEVTreeColumnCharCount(DataColumn.FileInfo fileInfo) throws Exception, ParseException {
+        InputStream in = FileUtils.getInputStream(fileInfo.loadPath, fileInfo.resource);
+        int evTreeTotalCharCount = -1;
+        try {
+        	evTreeTotalCharCount = checkevTreeColumnExistsAndCalculateCharNums(in, fileInfo);
+        } catch (ParseException e) {
+            in.close();
+            throw e;
+        }
+
+        if (in != null) {
+            in.close();
+        }
+        
+        return evTreeTotalCharCount;
+        
+    }
 
     protected boolean loadEncrypted(DataColumn.FileInfo fileInfo, boolean defaultPack) throws Exception {
 
@@ -1721,18 +1962,48 @@ public class TSCreator extends JApplet implements ActionListener {
             	} else {
             		return false;
             	}
-            } else {
-                int count = numCharsInFile(fileInfo.loadPath);
-                if (count <= NUMBER_LINES_LIMIT_PUBLIC) {
+            } else 
+            {
+            	// check whether evolutionary tree datapack exists or not, if exists then count
+            	//characters without it
+            	String extension = FileUtils.getExtension(fileInfo.loadPath);
+            	
+            	int count = 0;
+            	int evTreeColumnCharCount = 0;
+            	
+            	InputStream in = FileUtils.getInputStream(fileInfo.loadPath, fileInfo.resource);   
+                encryptedDatapack = !DatafileCrypto.isDecryptedFile(in);
+                in.close();
+                
+            	if (!defaultPack && extension.equalsIgnoreCase("txt") && encryptedDatapack == false) {
+            		evTreeColumnCharCount = getEVTreeColumnCharCount(fileInfo);
+            	}
+            	
+            	if (!defaultPack && extension.equalsIgnoreCase("txt") && encryptedDatapack == false) {
+            		count = numCharsInFile(fileInfo.loadPath);
+            		count -= evTreeColumnCharCount;
+            	} 
+            	
+            	
+                // resetting variables
+                numCharsInDatapack = -1;
+                numLinesInDatapack = -1;
+                evTreeColumnExists = false;
+                encryptedDatapack = false;
+                
+                if (defaultPack || count <= NUMBER_CHARS_LIMIT_PUBLIC) {
                     if (numDatapacksAdded < NUMBER_DATAPACKS_LIMIT_PUBLIC) {
                         db.load(fileInfo);
                         numDatapacksAdded++;
+
                         return true;
                     } else {
                         violatedLimitPublic = true;
                     }
                 } else {
                     violatedLimitPublic = true;
+                    logAndShow(Language.translate("Cannot load unencrpted large files in Public Version", true), ERROR);
+                    throw new Exception("Public Limit Reached");
                 }
             }
 
@@ -2428,7 +2699,7 @@ public class TSCreator extends JApplet implements ActionListener {
                     loadDefaultData();
                 }
             } else if(e == loadAddWithBuiltInAction){
-                numDatapacksAdded += 1;
+                //numDatapacksAdded += 1;
                 // load the default data
                 clearSettings();
                 loadDefaultData();
@@ -2444,8 +2715,8 @@ public class TSCreator extends JApplet implements ActionListener {
                     //if the datapack is loaded should numDatapack be incremented: Adi ?
                 }
             } else if (e == loadAddFromFileAction) {
-            	numDatapacksAdded += 1;
                 loadDataFromFile(false, false);
+            	//numDatapacksAdded += 1;
             } else if (e == saveAsAction) {
                 saveDataAs();
             } else if (e == saveAsJsonAction) {
@@ -2778,6 +3049,18 @@ public class TSCreator extends JApplet implements ActionListener {
                     TSCreator.BUILT_IN_DATA_FILE = args[i + 1];
                     TSCreator.command_line_datapack_flag = true;
                     System.out.println("Using datafile: " + BUILT_IN_DATA_FILE);
+                    
+                    // Get other datapacks
+                    command_line_datapacks = new ArrayList<String>();
+                    int n = 2;
+                    String nextArg = args[i+n];
+                    while(nextArg.length() > 1 && nextArg.contains("-") == false) {
+                    	command_line_datapacks.add(nextArg);
+                    	n++;
+                    	nextArg = args[i+n];
+                    }
+                    System.out.println(command_line_datapacks.size());
+                    
                 } else if (args[i].equalsIgnoreCase("-ss")) {
                     if (args.length == i + 1) {
                         continue;
@@ -2815,6 +3098,7 @@ public class TSCreator extends JApplet implements ActionListener {
                     }
 
                     TSCreator.DEFAULT_SETTINGS_FILE = args[i + 1];
+                    TSCreator.command_line_settings_flag = true;
                     System.out.println("Using settings file: " + DEFAULT_SETTINGS_FILE);
                 } else if (args[i].equalsIgnoreCase("-node")) {
                 	System.out.println("Running node...");
