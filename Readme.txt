@@ -3,13 +3,13 @@ Title of manuscript: Visualization of  evolutionary relationships through geolog
 Author details:
 1. Abdullah Khan Zehady 
 	Department of Earth, Atmospheric and Planetary Science, Purdue University, West Lafayette, IN 47907 USA
-2. James G. Oggb
+2. James G. Ogg
 	State Key Laboratory of Oil and Gas Reservoir Geology and Exploitation, Chengdu University of Technology, Chengdu, Sichuan 610059, China
-3. Barry G. Fordhamc
+3. Barry G. Fordham
 	Research School of Earth Sciences, Australian National University, Canberra, ACT 2601, Australia
-4. Gangi Palemd
+4. Gangi Palem
 	Google Inc., 1600 Amphitheatre Parkway, Mountain View, CA 94043
-5. Jason Bobicke
+5. Jason Bobick
 	Department of Computer and Information Technology, Purdue University, West Lafayette, IN 47907 USA
 6. Gabi Ogg
 	Geologic TimeScale Foundation, 1224 N. Salisbury St., West Lafayette, IN 47906
